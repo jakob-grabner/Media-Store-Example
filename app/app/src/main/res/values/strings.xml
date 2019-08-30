@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">MediaStore</string>
+    <string name="action_settings">Settings</string>
+</resources>
