@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.DatabaseUtils
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +19,8 @@ import kotlinx.android.synthetic.main.content_main.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.*
 
 
 class MainActivity : AppCompatActivity() {
@@ -36,7 +39,11 @@ class MainActivity : AppCompatActivity() {
     fun save() {
         lifecycleScope.launch {
             val bitmap = loadBitmap(R.drawable.android)
-            saveImageToGallery(this@MainActivity, bitmap, "img_${System.currentTimeMillis()}.jpg")?.let {
+            saveImageToGallery(
+                this@MainActivity,
+                bitmap,
+                "img_${System.currentTimeMillis()}.jpg"
+            )?.let {
                 printMediaStoreEntry(it)
             }
         }
@@ -49,19 +56,19 @@ class MainActivity : AppCompatActivity() {
 
 
     private suspend fun saveImageToGallery(
-            context: Context,
-            bitmap: Bitmap,
-            imageName: String
+        context: Context,
+        bitmap: Bitmap,
+        imageName: String
     ): Uri? = withContext(Dispatchers.IO) {
         try {
             val contentResolver = context.contentResolver
+            val exifDateFormatter = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
 
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, imageName)
                 put(MediaStore.Images.Media.DESCRIPTION, imageName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                 put(MediaStore.Images.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
-                put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis())
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.Images.Media.IS_PENDING, 1)
@@ -74,11 +81,24 @@ class MainActivity : AppCompatActivity() {
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             }
             val galleryFileUri = contentResolver.insert(collection, values)
-                    ?: return@withContext null
+                ?: return@withContext null
 
             // Save file to uri from MediaStore
             contentResolver.openOutputStream(galleryFileUri).use {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it)
+            }
+
+            // Add exif data
+            contentResolver.openFileDescriptor(galleryFileUri, "rw")?.use {
+                // set Exif attribute so MediaStore.Images.Media.DATE_TAKEN will be set
+                ExifInterface(it.fileDescriptor)
+                    .apply {
+                        setAttribute(
+                            ExifInterface.TAG_DATETIME_ORIGINAL,
+                            exifDateFormatter.format(Date())
+                        )
+                        saveAttributes()
+                    }
             }
 
             // Now that we're finished, release the "pending" status, and allow other apps to view the image.
@@ -98,11 +118,11 @@ class MainActivity : AppCompatActivity() {
     suspend fun printMediaStoreEntry(imageUri: Uri) = withContext(Dispatchers.IO) {
 
         contentResolver.query(
-                imageUri,
-                null,
-                null,
-                null,
-                null
+            imageUri,
+            null,
+            null,
+            null,
+            null
         ).use { cursor ->
             val imgInfo = DatabaseUtils.dumpCursorToString(cursor)
             Log.d("MSTEST", imgInfo)
